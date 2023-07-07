@@ -26,7 +26,7 @@ LDFLAGS_ALL=$(LDFLAGS) $(LIBS)
 
 BIN=idlemon
 
-OBJS=main.o
+OBJS=main.o util.o
 
 all: $(BIN)
 

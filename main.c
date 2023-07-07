@@ -1,7 +1,6 @@
 
 #include <errno.h>
 #include <signal.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +13,13 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/scrnsaver.h>
 
+#include "idlemon.h"
+
+bool color_tty = true;
+struct log_config log_config = {
+	.level = LOG_DEBUG,
+	.time = true,
+};
 static time_t signal_time = 0;
 
 static void
@@ -42,24 +48,20 @@ xss_get_idle(void)
 		int error_base;
 
 		if ((dpy = XOpenDisplay(NULL)) == NULL) {
-			fprintf(stderr, "error: xss: failed to open display\n");
-			exit(1);
+			log_fatal("xss: failed to open display");
 		}
 
 		if (XScreenSaverQueryExtension(dpy, &event_base, &error_base) == 0) {
-			fprintf(stderr, "error: xss: extension not enabled\n");
-			exit(1);
+			log_fatal("xss: extension not enabled");
 		}
 
 		if ((info = XScreenSaverAllocInfo()) == NULL) {
-			fprintf(stderr, "error: xss: out of memory\n");
-			exit(1);
+			log_fatal("xss: out of memory");
 		}
 	}
 
 	if (XScreenSaverQueryInfo(dpy, XDefaultRootWindow(dpy), info) == 0) {
-		fprintf(stderr, "error: xss: query failed\n");
-		exit(1);
+		log_fatal("xss: query failed");
 	}
 
 	return info->idle;
@@ -97,9 +99,10 @@ task_start(struct task *task)
 	pid_t pid;
 
 	if ((pid = fork()) == -1) {
-		fprintf(stderr, "error: fork(): %s", strerror(errno));
+		log_fatal("fork():");
 		return;
 	} else if (pid > 0) {
+		log_info("task started: %s", task->argv[0]);
 		task->pid = pid;
 		task->state = TASK_STARTED;
 		return;
@@ -116,7 +119,7 @@ task_wait(struct task *task)
 
 	switch (waitpid(task->pid, &status, WNOHANG)) {
 	case -1:
-		fprintf(stderr, "error: waitpid failed: %s\n", strerror(errno));
+		log_error("waitpid failed:");
 		task->state = TASK_COMPLETED;
 		return true;
 	case 0:
@@ -127,15 +130,15 @@ task_wait(struct task *task)
 		int code = WEXITSTATUS(status);
 		switch (code) {
 		case 255:
-			fprintf(stderr, "error: task failed to start: %s\n", task->argv[0]);
+			log_error("task failed to start: %s", task->argv[0]);
 			break;
 		case 254:
-			fprintf(stderr, "error: task failed to start: %s not found\n", task->argv[0]);
+			log_error("task failed to start: %s not found", task->argv[0]);
 			break;
 		default:
 			if (code != 0) {
-				fprintf(stderr, "error: task exited with non-zero status (%d): %s\n",
-						code, task->argv[0]);
+				log_error("task exited with non-zero status (%d): %s", code,
+						task->argv[0]);
 			}
 			break;
 		}
@@ -145,7 +148,7 @@ task_wait(struct task *task)
 
 	if (WIFSIGNALED(status)) {
 		int sig = WTERMSIG(status);
-		fprintf(stderr, "warn: task received signal (%d): %s\n", sig, task->argv[0]);
+		log_warn("task received signal (%d): %s", sig, task->argv[0]);
 		task->state = TASK_COMPLETED;
 		return true;
 	}
@@ -156,6 +159,7 @@ task_wait(struct task *task)
 static void
 task_reset(struct task *task)
 {
+	log_debug("task reset: %s", task->argv[0]);
 	task->state = TASK_PENDING;
 }
 
@@ -172,6 +176,7 @@ task_process(struct task *task, unsigned long idle, bool idle_reset)
 		if (!task_wait(task)) {
 			break;
 		}
+		log_info("task complete: %s", task->argv[0]);
 		// waited upon task has completed so we can run completed branch
 		// fallthrough
 	case TASK_COMPLETED:
@@ -190,6 +195,8 @@ main(int argc, char **argv)
 
 	(void)argc;
 	(void)argv;
+
+	color_tty = getenv("NOCOLOR") == NULL;
 
 	tasks = &(struct task){
 		.next = tasks,
@@ -211,13 +218,14 @@ main(int argc, char **argv)
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = SA_RESTART;
 	if (sigaction(SIGUSR1, &sa, NULL) == -1) {
-		fprintf(stderr, "error: failed to register signal handler\n");
-		exit(1);
+		log_fatal("failed to register signal handler:");
 	}
 
 	for (;;) {
 		unsigned long idle = get_idle();
 		bool idle_reset = idle < prev_idle;
+
+		log_debug("loop: idle=%ld, idle_reset=%d", idle, idle_reset);
 
 		for (struct task *task = tasks; task != NULL; task = task->next) {
 			task_process(task, idle, idle_reset);
