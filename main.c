@@ -1,0 +1,178 @@
+
+#include <errno.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
+
+static unsigned long
+get_idle(void)
+{
+	// TODO: get actual idle time
+
+	static time_t start = 0;
+	time_t now;
+	unsigned long idle;
+
+	if (start == 0) {
+		start = time(NULL);
+	}
+	now = time(NULL);
+	idle = now > start ? (now - start) * 1000 : 0;
+	if (idle > 5000) {
+		idle = 0;
+		start = now;
+	}
+	return idle;
+}
+
+enum taskstate {
+	TASK_PENDING,
+	TASK_STARTED,
+	TASK_COMPLETED,
+};
+
+struct task {
+	struct task *next;
+	char **argv;
+	unsigned long delay;
+
+	enum taskstate state;
+	pid_t pid;
+};
+
+static void
+task_start(struct task *task)
+{
+	pid_t pid;
+
+	if ((pid = fork()) == -1) {
+		fprintf(stderr, "error: fork(): %s", strerror(errno));
+		return;
+	} else if (pid > 0) {
+		task->pid = pid;
+		task->state = TASK_STARTED;
+		return;
+	}
+
+	execvp(task->argv[0], task->argv);
+	_exit(errno == ENOENT ? 254 : 255);
+}
+
+static bool
+task_wait(struct task *task)
+{
+	int status = 0;
+
+	switch (waitpid(task->pid, &status, WNOHANG)) {
+	case -1:
+		fprintf(stderr, "error: waitpid failed: %s\n", strerror(errno));
+		task->state = TASK_COMPLETED;
+		return true;
+	case 0:
+		return false;
+	}
+
+	if (WIFEXITED(status)) {
+		int code = WEXITSTATUS(status);
+		switch (code) {
+		case 255:
+			fprintf(stderr, "error: task failed to start: %s\n", task->argv[0]);
+			break;
+		case 254:
+			fprintf(stderr, "error: task failed to start: %s not found\n", task->argv[0]);
+			break;
+		default:
+			if (code != 0) {
+				fprintf(stderr, "error: task exited with non-zero status (%d): %s\n",
+						code, task->argv[0]);
+			}
+			break;
+		}
+		task->state = TASK_COMPLETED;
+		return true;
+	}
+
+	if (WIFSIGNALED(status)) {
+		int sig = WTERMSIG(status);
+		fprintf(stderr, "warn: task received signal (%d): %s\n", sig, task->argv[0]);
+		task->state = TASK_COMPLETED;
+		return true;
+	}
+
+	return false;
+}
+
+static void
+task_reset(struct task *task)
+{
+	task->state = TASK_PENDING;
+}
+
+static void
+task_process(struct task *task, unsigned long idle, bool idle_reset)
+{
+	switch (task->state) {
+	case TASK_PENDING:
+		if (idle >= task->delay) {
+			task_start(task);
+		}
+		break;
+	case TASK_STARTED:
+		if (!task_wait(task)) {
+			break;
+		}
+		// waited upon task has completed so we can run completed branch
+		// fallthrough
+	case TASK_COMPLETED:
+		if (idle_reset) {
+			task_reset(task);
+		}
+	}
+}
+
+int
+main(int argc, char **argv)
+{
+	struct task *tasks = NULL;
+	unsigned long prev_idle = 0;
+
+	(void)argc;
+	(void)argv;
+
+	tasks = &(struct task){
+		.next = tasks,
+		.argv = (char *[]){"./file-that-should-not-exist", NULL},
+		.delay = 2000,
+	};
+	tasks = &(struct task){
+		.next = tasks,
+		.argv = (char *[]){"date", "-Is", NULL},
+		.delay = 3000,
+	};
+	tasks = &(struct task){
+		.next = tasks,
+		.argv = (char *[]){"sleep", "100", NULL},
+		.delay = 3001,
+	};
+
+	for (;;) {
+		unsigned long idle = get_idle();
+		bool idle_reset = idle < prev_idle;
+
+		for (struct task *task = tasks; task != NULL; task = task->next) {
+			task_process(task, idle, idle_reset);
+		}
+
+		prev_idle = idle;
+		sleep(1);
+	}
+
+	return 0;
+}
+
