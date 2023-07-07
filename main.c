@@ -9,26 +9,50 @@
 #include <time.h>
 #include <unistd.h>
 
+// used by `xss_get_idle()`
+#include <X11/Xlib.h>
+#include <X11/extensions/scrnsaver.h>
+
+
+static unsigned long
+xss_get_idle(void)
+{
+	static Display *dpy = NULL;
+	static XScreenSaverInfo *info = NULL;
+
+	if (info == NULL) {
+		int event_base;
+		int error_base;
+
+		if ((dpy = XOpenDisplay(NULL)) == NULL) {
+			fprintf(stderr, "error: xss: failed to open display\n");
+			exit(1);
+		}
+
+		if (XScreenSaverQueryExtension(dpy, &event_base, &error_base) == 0) {
+			fprintf(stderr, "error: xss: extension not enabled\n");
+			exit(1);
+		}
+
+		if ((info = XScreenSaverAllocInfo()) == NULL) {
+			fprintf(stderr, "error: xss: out of memory\n");
+			exit(1);
+		}
+	}
+
+	if (XScreenSaverQueryInfo(dpy, XDefaultRootWindow(dpy), info) == 0) {
+		fprintf(stderr, "error: xss: query failed\n");
+		exit(1);
+	}
+
+	return info->idle;
+}
 
 static unsigned long
 get_idle(void)
 {
-	// TODO: get actual idle time
-
-	static time_t start = 0;
-	time_t now;
-	unsigned long idle;
-
-	if (start == 0) {
-		start = time(NULL);
-	}
-	now = time(NULL);
-	idle = now > start ? (now - start) * 1000 : 0;
-	if (idle > 5000) {
-		idle = 0;
-		start = now;
-	}
-	return idle;
+	// TODO: add other idle sources here
+	return xss_get_idle();
 }
 
 enum taskstate {
