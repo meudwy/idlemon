@@ -1,5 +1,6 @@
 
 #include <errno.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,22 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/scrnsaver.h>
 
+static time_t signal_time = 0;
+
+static void
+signal_handler(int sig)
+{
+	if (sig == SIGUSR1) {
+		signal_time = time(NULL);
+	}
+}
+
+static unsigned long
+signal_get_idle(void)
+{
+	time_t now = time(NULL);
+	return now > signal_time ? (now - signal_time) * 1000 : 0;
+}
 
 static unsigned long
 xss_get_idle(void)
@@ -51,8 +68,12 @@ xss_get_idle(void)
 static unsigned long
 get_idle(void)
 {
-	// TODO: add other idle sources here
-	return xss_get_idle();
+	unsigned long signal_idle, xss_idle;
+
+	signal_idle = signal_get_idle();
+	xss_idle = xss_get_idle();
+
+	return xss_idle < signal_idle ? xss_idle : signal_idle;
 }
 
 enum taskstate {
@@ -163,6 +184,7 @@ task_process(struct task *task, unsigned long idle, bool idle_reset)
 int
 main(int argc, char **argv)
 {
+	struct sigaction sa = {0};
 	struct task *tasks = NULL;
 	unsigned long prev_idle = 0;
 
@@ -184,6 +206,14 @@ main(int argc, char **argv)
 		.argv = (char *[]){"sleep", "100", NULL},
 		.delay = 3001,
 	};
+
+	sa.sa_handler = signal_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+	if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+		fprintf(stderr, "error: failed to register signal handler\n");
+		exit(1);
+	}
 
 	for (;;) {
 		unsigned long idle = get_idle();
