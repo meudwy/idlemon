@@ -6,16 +6,22 @@
 
 #include "idlemon.h"
 
+static inline const char *
+task_name(const struct task *task)
+{
+	return task->name != NULL ? task->name : task->argv[0];
+}
+
 static void
 task_start(struct task *task)
 {
 	pid_t pid;
 
 	if ((pid = fork()) == -1) {
-		log_fatal("task: [%s] fork failed:", task->argv[0]);
+		log_fatal("task: [%s] fork failed:", task_name(task));
 		return;
 	} else if (pid > 0) {
-		log_info("task: [%s] started", task->argv[0]);
+		log_info("task: [%s] started", task_name(task));
 		task->pid = pid;
 		task->state = TASK_STARTED;
 		return;
@@ -32,7 +38,7 @@ task_wait(struct task *task)
 
 	switch (waitpid(task->pid, &status, WNOHANG)) {
 	case -1:
-		log_error("task: [%s] waitpid failed:", task->argv[0]);
+		log_error("task: [%s] waitpid failed:", task_name(task));
 		task->state = TASK_COMPLETED;
 		return true;
 	case 0:
@@ -43,15 +49,15 @@ task_wait(struct task *task)
 		int code = WEXITSTATUS(status);
 		switch (code) {
 		case 255:
-			log_error("task: [%s] failed to start", task->argv[0]);
+			log_error("task: [%s] failed to start", task_name(task));
 			break;
 		case 254:
-			log_error("task: [%s] not found", task->argv[0]);
+			log_error("task: [%s] not found", task_name(task));
 			break;
 		default:
 			if (code != 0) {
 				log_error("task: [%s] exited with non-zero status (%d)",
-						task->argv[0], code);
+						task_name(task), code);
 			}
 			break;
 		}
@@ -61,7 +67,7 @@ task_wait(struct task *task)
 
 	if (WIFSIGNALED(status)) {
 		int sig = WTERMSIG(status);
-		log_warn("task: [%s] received signal (%d)", task->argv[0], sig);
+		log_warn("task: [%s] received signal (%d)", task_name(task), sig);
 		task->state = TASK_COMPLETED;
 		return true;
 	}
@@ -72,7 +78,7 @@ task_wait(struct task *task)
 static void
 task_reset(struct task *task)
 {
-	log_debug("task: [%s] reset", task->argv[0]);
+	log_debug("task: [%s] reset", task_name(task));
 	task->state = TASK_PENDING;
 }
 
@@ -89,7 +95,7 @@ task_process(struct task *task, unsigned long idle, bool idle_reset)
 		if (!task_wait(task)) {
 			break;
 		}
-		log_info("task: [%s] complete", task->argv[0]);
+		log_info("task: [%s] complete", task_name(task));
 		// waited upon task has completed so we can run completed branch
 		// fallthrough
 	case TASK_COMPLETED:
@@ -102,6 +108,9 @@ task_process(struct task *task, unsigned long idle, bool idle_reset)
 void
 task_deinit(struct task *task)
 {
+	if (task->name != NULL) {
+		free(task->name);
+	}
 	if (task->argv != NULL) {
 		for (char **p = task->argv; *p != NULL; p++) {
 			free(*p);

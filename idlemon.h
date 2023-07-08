@@ -16,6 +16,7 @@ enum taskstate {
 
 struct task {
 	struct task *next;
+	char *name;
 	char **argv;
 	unsigned long delay;
 

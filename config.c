@@ -251,7 +251,16 @@ config_load(const char *filename, struct config *cfg)
 			break;
 
 		case SECTION_TASK:
-			if (strcmp(key, "argv") == 0) {
+			if (strcmp(key, "name") == 0) {
+				if (task.name != NULL) {
+					goto duplicate_key;
+				}
+				if ((task.name = strdup(val)) == NULL) {
+					log_error("config: strdup failed:");
+					goto failed;
+				}
+				continue;
+			} else if (strcmp(key, "argv") == 0) {
 				if (task.argv != NULL) {
 					goto duplicate_key;
 				}
