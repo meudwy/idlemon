@@ -318,6 +318,8 @@ config_load_and_swap(const char *filename)
 
 	config_deinit(&config);
 	memcpy(&config, &cfg, sizeof(config));
+
+	log_info("config: loaded %s", filename);
 	return true;
 }
 

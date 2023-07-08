@@ -18,6 +18,7 @@ bool color_tty = true;
 struct config config = CONFIG_INIT;
 
 static bool running = true;
+static bool reload_config = false;
 static time_t signal_time = 0;
 
 
@@ -27,6 +28,9 @@ signal_handler(int sig)
 	switch (sig) {
 	case SIGUSR1:
 		signal_time = time(NULL);
+		break;
+	case SIGUSR2:
+		reload_config = true;
 		break;
 	case SIGINT:
 		running = false;
@@ -45,6 +49,9 @@ register_signal_handlers(void)
 	sigemptyset(&sa.sa_mask);
 
 	if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+		return false;
+	}
+	if (sigaction(SIGUSR2, &sa, NULL) == -1) {
 		return false;
 	}
 	if (sigaction(SIGINT, &sa, NULL) == -1) {
@@ -144,8 +151,16 @@ main(int argc, char **argv)
 	}
 
 	while (running) {
-		unsigned long idle = get_idle();
-		bool idle_reset = idle < prev_idle;
+		unsigned long idle;
+		bool idle_reset;
+
+		if (reload_config) {
+			config_load_and_swap(config_filename);
+			reload_config = false;
+		}
+
+		idle = get_idle();
+		idle_reset = idle < prev_idle;
 
 		log_debug("loop: idle=%ld, idle_reset=%d", idle, idle_reset);
 
