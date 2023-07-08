@@ -14,3 +14,21 @@ Options:
   -c <filename> (default: ~/.config/idlemon.conf) config filename
 
 ```
+
+## Example Config
+
+The following configuration will lock the screen after 10 minutes of idle time,
+and shut the system down after 24 hours.
+
+```
+[task]
+name = Lock Screen
+argv = slock
+delay = 10m
+
+[task]
+name = Shutdown
+argv = systemctl poweroff
+delay = 24h
+```
+
