@@ -112,7 +112,7 @@ main(int argc, char **argv)
 	int opt;
 	char *config_filename = NULL;
 
-	color_tty = getenv("NO_COLOR") == NULL;
+	color_tty = getenv("NO_COLOR") == NULL && isatty(STDERR_FILENO);
 
 	while ((opt = getopt(argc, argv, "c:")) != -1) {
 		if (opt == 'c') {
