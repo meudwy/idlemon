@@ -100,16 +100,18 @@ parse_duration(char *s)
 }
 
 static bool
-append_task(struct config *cfg, struct task *task)
+append_task(struct config *cfg, struct task *task, size_t section_line_num)
 {
 	struct task *t;
 
-	if (task->argv == NULL) {
-		// TODO: store section_line_num and log it here
-		log_error("config: task.argv required");
+	if (task->name == NULL) {
+		log_error("config: 'name' required for task on line %zu", section_line_num);
 		return false;
 	}
-
+	if (task->argv == NULL) {
+		log_error("config: 'argv' required for task on line %zu", section_line_num);
+		return false;
+	}
 	if (task->delay == 0) {
 		task->delay = cfg->delay;
 	}
@@ -134,6 +136,7 @@ config_load(const char *filename, struct config *cfg)
 	char *line = NULL;
 	size_t line_cap = 0;
 	size_t line_num = 0;
+	size_t section_line_num = 0;
 	enum {
 		SECTION_GLOBAL,
 		SECTION_LOG,
@@ -170,11 +173,11 @@ config_load(const char *filename, struct config *cfg)
 		case '#':
 			continue;
 		case '[':
-			if (section == SECTION_TASK) {
-				if (!append_task(cfg, &task)) {
-					goto failed;
-				}
+			if (section == SECTION_TASK && !append_task(cfg, &task, section_line_num)) {
+				goto failed;
 			}
+
+			section_line_num = line_num;
 
 			s++;
 			strtolower(s);
@@ -255,6 +258,13 @@ config_load(const char *filename, struct config *cfg)
 				if (task.name != NULL) {
 					goto duplicate_key;
 				}
+				for (struct task *t = cfg->tasks; t != NULL; t = t->next) {
+					if (strcmp(t->name, val) == 0) {
+						log_error("config: duplicate task name '%s' on line %zu",
+								val, line_num);
+						goto failed;
+					}
+				}
 				if ((task.name = strdup(val)) == NULL) {
 					log_error("config: strdup failed:");
 					goto failed;
@@ -295,7 +305,7 @@ duplicate_key:
 	}
 
 	if (section == SECTION_TASK) {
-		if (!append_task(cfg, &task)) {
+		if (!append_task(cfg, &task, section_line_num)) {
 			goto failed;
 		}
 	}
