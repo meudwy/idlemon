@@ -102,8 +102,6 @@ parse_duration(char *s)
 static bool
 append_task(struct config *cfg, struct task *task, size_t section_line_num)
 {
-	struct task *t;
-
 	if (task->name == NULL) {
 		log_error("config: 'name' required for task on line %zu", section_line_num);
 		return false;
@@ -115,17 +113,11 @@ append_task(struct config *cfg, struct task *task, size_t section_line_num)
 	if (task->delay == 0) {
 		task->delay = cfg->delay;
 	}
-
-	if ((t = malloc(sizeof(*t))) == NULL) {
-		log_error("config: malloc failed:");
+	if (!tasklist_append(&cfg->tasks, task)) {
+		log_error("config: failed to append task:");
 		return false;
 	}
-
-	memcpy(t, task, sizeof(*t));
 	memset(task, 0, sizeof(*task));
-
-	t->next = cfg->tasks;
-	cfg->tasks = t;
 	return true;
 }
 
@@ -144,6 +136,7 @@ config_load(const char *filename, struct config *cfg)
 		SECTION_UNKNOWN,
 	} section = SECTION_GLOBAL;
 	struct task task = {0};
+	bool loaded = true;
 
 	*cfg = (struct config)CONFIG_INIT;
 
@@ -258,8 +251,8 @@ config_load(const char *filename, struct config *cfg)
 				if (task.name != NULL) {
 					goto duplicate_key;
 				}
-				for (struct task *t = cfg->tasks; t != NULL; t = t->next) {
-					if (strcmp(t->name, val) == 0) {
+				for (size_t i = 0; i < cfg->tasks.len; i++) {
+					if (strcmp(cfg->tasks.entries[i].name, val) == 0) {
 						log_error("config: duplicate task name '%s' on line %zu",
 								val, line_num);
 						goto failed;
@@ -317,13 +310,14 @@ failed:
 	task_deinit(&task);
 
 	memset(cfg, 0, sizeof(*cfg));
+	loaded = false;
 
 cleanup:
 	if (line != NULL) {
 		free(line);
 	}
 	fclose(f);
-	return cfg->tasks != NULL;
+	return loaded;
 }
 
 bool
@@ -337,20 +331,17 @@ config_load_and_swap(const char *filename)
 
 	// Merge new tasks with existing old ones so we don't lose track of
 	// those that are already started/completed.
-	for (struct task *old_task = config.tasks, *prev_old_task = NULL, *next_old_task;
-			old_task != NULL; old_task = next_old_task) {
+	for (size_t i = 0; i < config.tasks.len; i++) {
+		struct task *old_task = &config.tasks.entries[i];
 		bool found = false;
 
-		next_old_task = old_task->next;
-
-		for (struct task *new_task = cfg.tasks; new_task != NULL;
-				new_task = new_task->next) {
+		for (size_t j = 0; j < cfg.tasks.len; j++) {
+			struct task *new_task = &cfg.tasks.entries[j];
 
 			if (strcmp(old_task->name, new_task->name) == 0) {
 				new_task->state = old_task->state;
 				new_task->pid = old_task->pid;
 				found = true;
-
 				log_debug("config: merged task '%s'", new_task->name);
 				break;
 			}
@@ -360,19 +351,19 @@ config_load_and_swap(const char *filename)
 		// keep it around until it completes. Mark as temporary so it can then
 		// be collected.
 		if (!found && old_task->state == TASK_STARTED) {
-			old_task->temporary = true;
-			old_task->next = cfg.tasks;
-			cfg.tasks = old_task;
+			struct task task;
 
-			if (prev_old_task != NULL) {
-				prev_old_task->next = next_old_task;
-			} else {
-				config.tasks = next_old_task;
+			if (task_clone(&task, old_task) == NULL) {
+				log_error("config: failed to clone task:");
+				goto failed;
 			}
 
+			task.temporary = true;
+			if (!tasklist_append(&cfg.tasks, &task)) {
+				log_error("config: failed to append task:");
+				goto failed;
+			}
 			log_debug("config: keeping removed task '%s'", old_task->name);
-		} else {
-			prev_old_task = old_task;
 		}
 	}
 
@@ -381,14 +372,21 @@ config_load_and_swap(const char *filename)
 
 	log_info("config: loaded %s", filename);
 	return true;
+
+failed:
+	config_deinit(&cfg);
+	return false;
 }
 
 void
 config_deinit(struct config *cfg)
 {
-	for (struct task *task = cfg->tasks, *next = NULL; task != NULL; task = next) {
-		next = task->next;
-		task_destroy(task);
+	if (cfg->tasks.entries != NULL) {
+		for (size_t i = 0; i < cfg->tasks.len; i++) {
+			task_deinit(&cfg->tasks.entries[i]);
+		}
+		free(cfg->tasks.entries);
 	}
+
 }
 

@@ -15,7 +15,6 @@ enum taskstate {
 };
 
 struct task {
-	struct task *next;
 	char *name;
 	char **argv;
 	unsigned long delay;
@@ -25,10 +24,17 @@ struct task {
 	pid_t pid;
 };
 
-bool task_process(struct task *task, unsigned long idle, bool idle_reset);
-void task_deinit(struct task *task);
-void task_destroy(struct task *task);
+struct tasklist {
+	struct task *entries;
+	size_t len;
+	size_t cap;
+};
 
+bool task_process(struct task *task, unsigned long idle, bool idle_reset);
+struct task *task_clone(struct task *dst, const struct task *src);
+void task_deinit(struct task *task);
+bool tasklist_append(struct tasklist *list, const struct task *task);
+void tasklist_remove(struct tasklist *list, size_t i);
 
 enum log_level {
 	LOG_ERROR,
@@ -66,7 +72,7 @@ struct config {
 		enum log_level level;
 		bool time;
 	} log;
-	struct task *tasks;
+	struct tasklist tasks;
 };
 
 #define CONFIG_INIT { \

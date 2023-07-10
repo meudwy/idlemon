@@ -1,6 +1,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -105,6 +106,43 @@ task_process(struct task *task, unsigned long idle, bool idle_reset)
 	return false;
 }
 
+struct task *
+task_clone(struct task *dst, const struct task *src)
+{
+	size_t argv_len;
+	char **pp;
+
+	memset(dst, 0, sizeof(*dst));
+
+	if ((dst->name = strdup(src->name)) == NULL) {
+		return NULL;
+	}
+
+	for (pp = src->argv, argv_len = 0; *pp != NULL; pp++, argv_len++) {
+	}
+	
+	if ((dst->argv = calloc(argv_len + 1, sizeof(*dst->argv))) == NULL) {
+		goto failed;
+	}
+
+	for (size_t i = 0; i < argv_len; i++) {
+		if ((dst->argv[i] = strdup(src->argv[i])) == NULL) {
+			goto failed;
+		}
+	}
+
+	dst->delay = src->delay;
+	dst->pid = src->pid;
+	dst->state = src->state;
+	dst->temporary = src->temporary;
+
+	return dst;
+
+failed:
+	task_deinit(dst);
+	return NULL;
+}
+
 void
 task_deinit(struct task *task)
 {
@@ -119,10 +157,38 @@ task_deinit(struct task *task)
 	}
 }
 
-void
-task_destroy(struct task *task)
+bool
+tasklist_append(struct tasklist *list, const struct task *task)
 {
-	task_deinit(task);
-	free(task);
+	if (list->len >= list->cap) {
+		size_t cap = list->cap == 0 ? 8 : list->cap * 2;
+		struct task *entries = realloc(list->entries, cap * sizeof(*entries));
+		if (entries == NULL) {
+			return false;
+		}
+		list->cap = cap;
+		list->entries = entries;
+	}
+
+	memcpy(&list->entries[list->len++], task, sizeof(*task));
+	return true;
+}
+
+void
+tasklist_remove(struct tasklist *list, size_t i)
+{
+	if (i >= list->len) {
+		return;
+	}
+
+	task_deinit(&list->entries[i]);
+
+	if (i != list->len - 1) {
+		// Swap with last entry as we don't care about maintaining order
+		memcpy(&list->entries[i], &list->entries[list->len - 1],
+				sizeof(*list->entries));
+	}
+
+	list->len--;
 }
 
