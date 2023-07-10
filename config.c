@@ -335,6 +335,47 @@ config_load_and_swap(const char *filename)
 		return false;
 	}
 
+	// Merge new tasks with existing old ones so we don't lose track of
+	// those that are already started/completed.
+	for (struct task *old_task = config.tasks, *prev_old_task = NULL, *next_old_task;
+			old_task != NULL; old_task = next_old_task) {
+		bool found = false;
+
+		next_old_task = old_task->next;
+
+		for (struct task *new_task = cfg.tasks; new_task != NULL;
+				new_task = new_task->next) {
+
+			if (strcmp(old_task->name, new_task->name) == 0) {
+				new_task->state = old_task->state;
+				new_task->pid = old_task->pid;
+				found = true;
+
+				log_debug("config: merged task '%s'", new_task->name);
+				break;
+			}
+		}
+
+		// If the task has been removed but already running then we need to 
+		// keep it around until it completes. Mark as temporary so it can then
+		// be collected.
+		if (!found && old_task->state == TASK_STARTED) {
+			old_task->temporary = true;
+			old_task->next = cfg.tasks;
+			cfg.tasks = old_task;
+
+			if (prev_old_task != NULL) {
+				prev_old_task->next = next_old_task;
+			} else {
+				config.tasks = next_old_task;
+			}
+
+			log_debug("config: keeping removed task '%s'", old_task->name);
+		} else {
+			prev_old_task = old_task;
+		}
+	}
+
 	config_deinit(&config);
 	memcpy(&config, &cfg, sizeof(config));
 

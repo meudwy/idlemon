@@ -164,8 +164,20 @@ main(int argc, char **argv)
 
 		log_debug("loop: idle=%ld, idle_reset=%d", idle, idle_reset);
 
-		for (struct task *task = config.tasks; task != NULL; task = task->next) {
-			task_process(task, idle, idle_reset);
+		for (struct task *task = config.tasks, *prev_task = NULL, *next_task;
+				task != NULL; task = next_task) {
+			next_task = task->next;
+			if (task_process(task, idle, idle_reset)) {
+				if (prev_task != NULL) {
+					prev_task->next = next_task;
+				} else {
+					config.tasks = next_task;
+				}
+				log_debug("removed temporary task '%s'", task->name);
+				task_destroy(task);
+			} else {
+				prev_task = task;
+			}
 		}
 
 		prev_idle = idle;

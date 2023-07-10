@@ -21,10 +21,11 @@ struct task {
 	unsigned long delay;
 
 	enum taskstate state;
+	bool temporary;
 	pid_t pid;
 };
 
-void task_process(struct task *task, unsigned long idle, bool idle_reset);
+bool task_process(struct task *task, unsigned long idle, bool idle_reset);
 void task_deinit(struct task *task);
 void task_destroy(struct task *task);
 

@@ -77,7 +77,7 @@ task_reset(struct task *task)
 	task->state = TASK_PENDING;
 }
 
-void
+bool
 task_process(struct task *task, unsigned long idle, bool idle_reset)
 {
 	switch (task->state) {
@@ -94,10 +94,15 @@ task_process(struct task *task, unsigned long idle, bool idle_reset)
 		// waited upon task has completed so we can run completed branch
 		// fallthrough
 	case TASK_COMPLETED:
-		if (idle_reset) {
-			task_reset(task);
+		if (task->temporary) {
+			return true;
+		} else {
+			if (idle_reset) {
+				task_reset(task);
+			}
 		}
 	}
+	return false;
 }
 
 void
