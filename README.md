@@ -12,6 +12,8 @@ Execute tasks based on the time the system has been idle.
 
 Options:
   -c <filename> (default: ~/.config/idlemon.conf) config filename
+  -p            ping active instance
+  -r            reload config of active instance
 
 ```
 

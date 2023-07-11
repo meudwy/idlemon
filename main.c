@@ -1,9 +1,14 @@
 
+#include <ctype.h>
+#include <dirent.h>
+#include <errno.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -105,24 +110,112 @@ xdg_config_filename(void)
 	return s;
 }
 
+static pid_t
+get_active_instance(void)
+{
+	struct stat st;
+	ino_t inode;
+	DIR *dir;
+
+	if (stat("/proc/self/exe", &st) == -1) {
+		log_fatal("failed to stat /proc/self/exe:");
+	}
+	inode = st.st_ino;
+
+	if ((dir = opendir("/proc")) == NULL) {
+		log_fatal("failed to open /proc:");
+	}
+
+	for (;;) {
+		struct dirent *entry;
+		char path[64];
+		ssize_t r;
+
+		errno = 0;
+		if ((entry = readdir(dir)) == NULL) {
+			if (errno != 0) {
+				log_fatal("failed to read /proc:");
+			}
+			break;
+		}
+
+		// TODO: stat entry to confirm it's a dir and get its time so we can
+		//       select the most recent instance. Also compare against
+		//       current user so allow an instance per user.
+		if (!isdigit(*entry->d_name)) {
+			continue;
+		}
+
+		r = snprintf(path, sizeof(path), "/proc/%s/exe", entry->d_name);
+		if (r < 0 || (size_t)r >= sizeof(path)) {
+			log_fatal("path overflow");
+		}
+
+		if (stat(path, &st) == -1) {
+			continue;
+		}
+
+		if (st.st_ino == inode) {
+			unsigned long n;
+			char *end = entry->d_name;
+			pid_t pid;
+
+			errno = 0;
+			n = strtoul(entry->d_name, &end, 10);
+			if (n == 0 || errno != 0 || *end != '\0') {
+				log_fatal("invalid pid string '%s'", entry->d_name);
+			}
+			pid = (pid_t)n;
+
+			if (getpid() != pid) {
+				closedir(dir);
+				return pid;
+			}
+		}
+	}
+
+	return -1;
+}
+
 int
 main(int argc, char **argv)
 {
 	unsigned long prev_idle = 0;
 	int opt;
 	char *config_filename = NULL;
+	pid_t active_instance;
 
 	color_tty = getenv("NO_COLOR") == NULL && isatty(STDERR_FILENO);
 
-	while ((opt = getopt(argc, argv, "c:")) != -1) {
-		if (opt == 'c') {
+	active_instance = get_active_instance();
+
+	while ((opt = getopt(argc, argv, "hprc:")) != -1) {
+		switch (opt) {
+		case 'c':
 			if (config_filename != NULL) {
 				free(config_filename);
 			}
 			if ((config_filename = strdup(optarg)) == NULL) {
 				log_fatal("strdup failed:");
 			}
-		} else {
+			break;
+
+		case 'p':
+			if (active_instance == -1) {
+				log_fatal("no active instance");
+			}
+			kill(active_instance, SIGUSR1);
+			return 0;
+
+		case 'r':
+			if (active_instance == -1) {
+				log_fatal("no active instance");
+			}
+			kill(active_instance, SIGUSR2);
+			return 0;
+
+		case 'h':
+		default:
 			fprintf(stderr,
 					"Usage: %s [options]\n"
 					"\n"
@@ -130,10 +223,17 @@ main(int argc, char **argv)
 					"\n"
 					"Options:\n"
 					"  -c <filename> (default: ~/.config/idlemon.conf) config filename\n"
+					"  -p            ping active instance\n"
+					"  -r            reload config of active instance\n"
 					"\n",
 					argv[0]);
 			exit(1);
 		}
+	}
+
+	// Only allow a single instance
+	if (active_instance != -1) {
+		log_fatal("active instance found");
 	}
 
 	if (config_filename == NULL) {
