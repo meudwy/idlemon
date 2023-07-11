@@ -116,6 +116,7 @@ get_active_instance(void)
 	struct stat st;
 	ino_t inode;
 	DIR *dir;
+	uid_t uid = getuid();
 
 	if (stat("/proc/self/exe", &st) == -1) {
 		log_fatal("failed to stat /proc/self/exe:");
@@ -139,10 +140,15 @@ get_active_instance(void)
 			break;
 		}
 
-		// TODO: stat entry to confirm it's a dir and get its time so we can
-		//       select the most recent instance. Also compare against
-		//       current user so allow an instance per user.
 		if (!isdigit(*entry->d_name)) {
+			continue;
+		}
+
+		r = snprintf(path, sizeof(path), "/proc/%s", entry->d_name);
+		if (r < 0 || (size_t)r >= sizeof(path)) {
+			log_fatal("path overflow");
+		}
+		if (lstat(path, &st) == -1 || !S_ISDIR(st.st_mode) || st.st_uid != uid) {
 			continue;
 		}
 
