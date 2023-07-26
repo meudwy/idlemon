@@ -1,4 +1,5 @@
 
+#include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/scrnsaver.h>
 
@@ -35,14 +36,16 @@ xss_deinit(void)
 	XCloseDisplay(dpy);
 }
 
-
-unsigned long
-xss_get_idle(void)
+struct xss
+xss_query(void)
 {
 	if (XScreenSaverQueryInfo(dpy, XDefaultRootWindow(dpy), info) == 0) {
 		log_fatal("xss: query failed");
 	}
 
-	return info->idle;
+	return (struct xss){
+		.idle = info->idle,
+		.active = info->state == ScreenSaverActive,
+	};
 }
 

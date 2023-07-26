@@ -79,14 +79,21 @@ task_reset(struct task *task)
 }
 
 bool
-task_process(struct task *task, unsigned long idle, bool idle_reset)
+task_process(struct task *task, const struct state *state,
+		const struct state *prev_state)
 {
 	switch (task->state) {
 	case TASK_PENDING:
-		if (idle >= task->delay) {
-			task_start(task);
+		{
+			bool start = task->delay == TASK_DELAY_XSS
+				? state->xss_active
+				: state->idle >= task->delay;
+
+			if (start) {
+				task_start(task);
+			}
+			break;
 		}
-		break;
 	case TASK_STARTED:
 		if (!task_wait(task)) {
 			break;
@@ -98,7 +105,11 @@ task_process(struct task *task, unsigned long idle, bool idle_reset)
 		if (task->temporary) {
 			return true;
 		} else {
-			if (idle_reset) {
+			bool reset = task->delay == TASK_DELAY_XSS
+				? state->xss_active != prev_state->xss_active
+				: state->idle < prev_state->idle;
+
+			if (reset) {
 				task_reset(task);
 			}
 		}

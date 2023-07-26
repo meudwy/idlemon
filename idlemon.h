@@ -1,12 +1,19 @@
 #ifndef IDLEMON_H
 #define IDLEMON_H
 
+#include <limits.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <sys/types.h>
 
 extern bool color_tty;
 
+#define TASK_DELAY_XSS ULONG_MAX
+
+struct state {
+	unsigned long idle;
+	bool xss_active;
+};
 
 enum taskstate {
 	TASK_PENDING,
@@ -30,7 +37,7 @@ struct tasklist {
 	size_t cap;
 };
 
-bool task_process(struct task *task, unsigned long idle, bool idle_reset);
+bool task_process(struct task *task, const struct state *state, const struct state *prev_state);
 struct task *task_clone(struct task *dst, const struct task *src);
 void task_deinit(struct task *task);
 bool tasklist_append(struct tasklist *list, const struct task *task);
@@ -90,8 +97,13 @@ bool config_load_and_swap(const char *filename);
 void config_deinit(struct config *cfg);
 
 
+struct xss {
+	unsigned long idle;
+	bool active;
+};
+
 void xss_init(void);
 void xss_deinit(void);
-unsigned long xss_get_idle(void);
+struct xss xss_query(void);
 
 #endif // IDLEMON_H

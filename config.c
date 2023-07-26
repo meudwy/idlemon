@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "idlemon.h"
 
@@ -55,6 +56,10 @@ parse_duration(char *s)
 	unsigned long n = 0;
 	unsigned long ms = 0;
 
+	if (strcasecmp(s, "xss") == 0) {
+		return TASK_DELAY_XSS;
+	}
+
 	for (;;) {
 		s = strltrim(s);
 		if (*s == '\0') {
@@ -68,7 +73,7 @@ parse_duration(char *s)
 			n = strtoul(s, &end, 10);
 			if (errno != 0 || end == s) {
 				log_error("config: invalid number");
-				return ULONG_MAX;
+				return 0;
 			}
 
 			s = end;
@@ -85,7 +90,7 @@ parse_duration(char *s)
 			case 'w':  ms += n * 1000 * 60 * 60 * 24 * 7; break;
 			default:
 				log_error("config: invalid unit '%c'", c);
-				return ULONG_MAX;
+				return 0;
 
 			}
 			number = true;
@@ -207,7 +212,7 @@ config_load(const char *filename, struct config *cfg)
 		switch (section) {
 		case SECTION_GLOBAL:
 			if (strcmp(key, "delay") == 0) {
-				if ((cfg->delay = parse_duration(val)) == ULONG_MAX) {
+				if ((cfg->delay = parse_duration(val)) == 0) {
 					log_error("config: invalid delay duration on line %zu", line_num);
 					goto failed;
 				}
@@ -276,7 +281,7 @@ config_load(const char *filename, struct config *cfg)
 				if (task.delay != 0) {
 					goto duplicate_key;
 				}
-				if ((task.delay = parse_duration(val)) == ULONG_MAX) {
+				if ((task.delay = parse_duration(val)) == 0) {
 					log_error("config: invalid task.delay duration on line %zu", line_num);
 					goto failed;
 				}

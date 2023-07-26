@@ -14,10 +14,6 @@
 
 #include "idlemon.h"
 
-#ifndef PATH_MAX
-#	define PATH_MAX 4096
-#endif
-
 
 bool color_tty = true;
 struct config config = CONFIG_INIT;
@@ -70,17 +66,6 @@ signal_get_idle(void)
 {
 	time_t now = time(NULL);
 	return now > signal_time ? (now - signal_time) * 1000 : 0;
-}
-
-static unsigned long
-get_idle(void)
-{
-	unsigned long signal_idle, xss_idle;
-
-	signal_idle = signal_get_idle();
-	xss_idle = xss_get_idle();
-
-	return xss_idle < signal_idle ? xss_idle : signal_idle;
 }
 
 static char *
@@ -186,10 +171,10 @@ get_active_instance(void)
 int
 main(int argc, char **argv)
 {
-	unsigned long prev_idle = 0;
 	int opt;
 	char *config_filename = NULL;
 	pid_t active_instance;
+	struct state state = {0}, prev_state = {0};
 
 	color_tty = getenv("NO_COLOR") == NULL && isatty(STDERR_FILENO);
 
@@ -257,22 +242,26 @@ main(int argc, char **argv)
 	}
 
 	while (running) {
-		unsigned long idle;
-		bool idle_reset;
+		unsigned long signal_idle;
+		struct xss xss;
 
 		if (reload_config) {
 			config_load_and_swap(config_filename);
 			reload_config = false;
 		}
 
-		idle = get_idle();
-		idle_reset = idle < prev_idle;
+		xss = xss_query();
+		signal_idle = signal_get_idle();
 
-		log_debug("loop: idle=%ld, idle_reset=%d", idle, idle_reset);
+		state.idle = xss.idle < signal_idle ? xss.idle : signal_idle;
+		state.xss_active = xss.active;
+
+		log_debug("loop: idle=%ld, xss_active=%s", state.idle,
+				state.xss_active ? "true" : "false");
 
 		for (size_t i = 0; i < config.tasks.len;) {
 			struct task *task = &config.tasks.entries[i];
-			if (task_process(task, idle, idle_reset)) {
+			if (task_process(task, &state, &prev_state)) {
 				log_debug("removed temporary task '%s'", task->name);
 				tasklist_remove(&config.tasks, i);
 			} else {
@@ -280,7 +269,7 @@ main(int argc, char **argv)
 			}
 		}
 
-		prev_idle = idle;
+		memcpy(&prev_state, &state, sizeof(prev_state));
 		sleep(1);
 	}
 
